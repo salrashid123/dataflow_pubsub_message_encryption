@@ -1,0 +1,6 @@
+setup.py
+gcp_encryption.egg-info/PKG-INFO
+gcp_encryption.egg-info/SOURCES.txt
+gcp_encryption.egg-info/dependency_links.txt
+gcp_encryption.egg-info/requires.txt
+gcp_encryption.egg-info/top_level.txt
