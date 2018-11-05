@@ -81,15 +81,11 @@ To run these commands, you need to either be a project owner or have the ability
    - `--pubsub_project_id`: projectID for the pubsub topic that DF writes _to_
    - `--pubsub_subscription`: Subscription to read messages from te output topic
 
-*  `subscriber.py`  Pubsub message subscriber that **directly** reads from a shared pubsub topic (similar to Dataflow Pipeline); (optional) this is used for debugging only
+*  `subscriber.py`  Pubsub message subscriber that **directly** reads from a shared pubsub topic (similar to Dataflow Pipeline); (optional) this is used for debugging only.  TO use this script. the `service_account` must have a subscription to the common message bus _and_ have access to the KMS keys that was used to encrypt the payload.
    - `--mode`: either `decrypt` or `verify`
    - `--service_account`: path to the service account json file to encrypt/sign and place on the common pubsub topic.
    - `--pubsub_project_id`: projectID for the shared pubsub topic
-   - `--pubsub_topic`: shared topic name
    - `--pubsub_subscription`:  Subscription to read messages from te shared topic
-   - `--kms_location`: location of the keyring
-   - `--kms_key_ring_id`: KMS key ring name
-   - `--kms_key_id`: the key to use for encryption/sign
 
 ### Setup Enviornment variables
 
@@ -556,7 +552,7 @@ or
 Note, in both cases, the PubSUb attributes are overrided.  Inorder to embed attributes, they will need to get placed as JSON within a message
 eg.
 
-```json
+```text
     cleartext_message = {
             "data" : "foo bar".encode(),
             "attributes" : {
@@ -577,8 +573,3 @@ alltogether.
 
 However, if you do need a shared pubsub topic and you need to ensure message secrecy or integrity per producer, you can
 explore variations of this technique.
-
-
-```
-python subscriber.py  --mode decrypt --service_account certs/svc-provider.json --pubsub_project_id $df_PROJECT  --pubsub_subscription message-bus   --tenantID tenantKey
-```
