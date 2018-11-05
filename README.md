@@ -502,7 +502,7 @@ Inorder to embed encrypted or signed payload, the specific technique used here i
 THat is, normally a pubsub message contains several user-defined and automatic fields:
 
 - [pubsub.proto](https://github.com/googleapis/googleapis/blob/master/google/pubsub/v1/pubsub.proto#L340)
-```json
+```text
 message PubsubMessage {
   // The message data field. If this field is empty, the message must contain
   // at least one attribute.
