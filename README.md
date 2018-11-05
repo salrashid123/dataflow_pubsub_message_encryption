@@ -470,13 +470,8 @@ decrypt the signature key.  With the paintext HMAC key, the pipeline can verify 
 
 To use this, simply alter `publisher.py` and pass in ```--mode=sign```.
 
-On the DF Pipeline side, set the `process()` function to `verify`:
+On the DF Pipeline side, set the `--mode` argument to `verify`:
 
-```python
-  def process(self, element):
-    #return [self.decrypt(element.attributes, element.data)]
-    return [self.verify(element.attributes, element.data)]
-```
 
 ## Ephemeral session encryption keys
 
