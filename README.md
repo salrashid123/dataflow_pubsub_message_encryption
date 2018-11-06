@@ -470,7 +470,20 @@ decrypt the signature key.  With the paintext HMAC key, the pipeline can verify 
 
 To use this, simply alter `publisher.py` and pass in ```--mode=sign```.
 
-On the DF Pipeline side, set the `--mode` argument to `verify`:
+On the DF Pipeline side, set the `--mode` argument to `verify`
+
+
+## Non-Repudiation
+The HMAC based signing and AES encryption provides only integrity and confidentiality…they do not provide non-repudiation (i.e. assertion that the message originator is authentic. You will need access to a Public-Private keypair to verify and sign the pubsub message similar to the integrity check above.
+
+There are two ways to achieve this:
+
+1. Use Cloud KMS APIs to sign each message and provide metadata attribute link to the KMS key that signed it.
+*  https://cloud.google.com/kms/docs/create-validate-signatures then on the Dataflow side, use a cached copy of the public key reference to verify https://cloud.google.com/kms/docs/retrieve-public-key
+
+2. Use a service_account’s public/private key reference to achieve a similar result to above:
+
+*  Use the private key for a given service_account to sign a message. Attach metadata reference to the URL of the public portion of that service key as a message attachement. On the DataFlow side, download the public key and use that to verify the signature. This technique is described here for purely pubsub: [salrashid123/gcp_pubsub_message_encryption](https://github.com/salrashid123/gcp_pubsub_message_encryption/tree/master/2_svc)
 
 
 ## Ephemeral session encryption keys
