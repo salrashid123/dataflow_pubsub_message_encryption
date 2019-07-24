@@ -61,6 +61,8 @@ kms_client = build('cloudkms', 'v1')
 name = 'projects/{}/locations/{}/keyRings/{}/cryptoKeys/{}'.format(
         kms_project_id, location_id, key_ring_id, crypto_key_id)
 
+publisher = pubsub.PublisherClient()
+
 if args.mode =="sign":
   logging.info(">>>>>>>>>>> Start Sign with with locally generated key. <<<<<<<<<<<")
 
@@ -141,12 +143,11 @@ if args.mode =="encrypt":
 
 
       logging.info("Start PubSub Publish")
-      publisher = pubsub.PublisherClient()
+      
       topic_name = 'projects/{project_id}/topics/{topic}'.format(
           project_id=pubsub_project_id,
           topic=PUBSUB_TOPIC,
       )
-      publisher = pubsub.PublisherClient()
       publisher.publish(topic_name, data=encrypted_message.encode('utf-8'), kms_key=name, dek_wrapped=dek_encrypted)
       logging.info("Published Message: " + encrypted_message)
       time.sleep(5)
