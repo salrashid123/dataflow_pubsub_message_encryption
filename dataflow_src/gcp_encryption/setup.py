@@ -18,8 +18,7 @@ CUSTOM_COMMANDS = [
     ['apt-get', '-y', 'install', 'python-dev'],
     ['apt-get', '-y', 'install', 'libffi-dev'],
     ['apt-get', '-y', 'install', 'libssl-dev'],
-    ['pip', 'install', 'cryptography'],
-    ['pip', 'install', 'oauth2client'],
+    ['pip', 'install', 'cryptography==2.9.2'],
 ]
 
 

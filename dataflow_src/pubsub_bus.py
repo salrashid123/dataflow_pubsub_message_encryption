@@ -15,13 +15,14 @@ from apache_beam.options.pipeline_options import SetupOptions
 from apache_beam.options.pipeline_options import StandardOptions
 from apache_beam.metrics import Metrics
 from apache_beam.metrics.metric import MetricsFilter
+from expiringdict import ExpiringDict
 
 from  apache_beam.io.gcp.pubsub  import PubsubMessage
 
+cache = ExpiringDict(max_len=100, max_age_seconds=200)
 
 class DecryptDoFn(beam.DoFn):
 
-  cache = None
   crypto_keys = None
 
   def __init__(self,mode='decrypt'):
@@ -34,28 +35,13 @@ class DecryptDoFn(beam.DoFn):
     import json
     import base64
     import httplib2
-    from apiclient.discovery import build
-    from oauth2client.client import GoogleCredentials
-    from expiringdict import ExpiringDict
+
+    from google.cloud import kms
+
     from gcp_encryption.utils import AESCipher, HMACFunctions, RSACipher
 
-    if self.cache is None:
-      self.cache = ExpiringDict(max_len=100, max_age_seconds=200)
-      
-    scope='https://www.googleapis.com/auth/cloudkms https://www.googleapis.com/auth/pubsub'
-    
-    credentials = GoogleCredentials.get_application_default()
-    if credentials.create_scoped_required():
-      credentials = credentials.create_scoped(scope)
-
-    http = httplib2.Http()
-    credentials.authorize(http)
-
+    client = kms.KeyManagementServiceClient()
     self.tenantID = 'tenantKey'
-
-    if self.crypto_keys is None:
-      kms_client = build('cloudkms', 'v1')
-      self.crypto_keys = kms_client.projects().locations().keyRings().cryptoKeys()
 
     logging.info("********** Start PubsubMessage ")
     logging.debug('Received message attributes["kms_key"]: {}'.format(attributes['kms_key']))
@@ -64,30 +50,31 @@ class DecryptDoFn(beam.DoFn):
     name = attributes['kms_key']
 
     try:
-      dek = self.cache[dek_wrapped]
+      dek = cache[dek_wrapped]
       logging.info("DEK Cache HIT: " + dek_wrapped)
     except KeyError:
       logging.info("DEK Cache MISS: " + dek_wrapped)
-      logging.info("Starting KMS decryption API call")
-      request = self.crypto_keys.decrypt(
-            name=name,
-            body={
-            'ciphertext': (dek_wrapped).decode('utf-8'),
-            'additionalAuthenticatedData': base64.b64encode(self.tenantID).decode('utf-8')
-            })
-      response = request.execute()
-      dek=  base64.b64decode(response['plaintext'])        
+      logging.info("Starting KMS decryption API call " + self.tenantID)
+
+      try:
+        dek = client.decrypt(name=name, 
+                  ciphertext=base64.b64decode(attributes['dek_wrapped']),
+                  additional_authenticated_data=self.tenantID.encode('utf-8'))
+    
+      except Error as e:
+        logging.debug("Error decrypting data " + e)
+
       logging.info("End KMS decryption API call")
-      logging.debug('Received aes_encryption_key : {}'.format( base64.b64encode(dek)))
+      logging.debug('Received aes_encryption_key : {}'.format(dek.plaintext.hex()))
           
-      self.cache[dek_wrapped] = dek
-    logging.debug("Starting AES decryption")
-    ac = AESCipher(dek)
+      cache[dek_wrapped] = dek
+    logging.info("Starting AES decryption")
+    ac = AESCipher(dek.plaintext)
     decrypted_data = ac.decrypt(data)
-    logging.debug("End AES decryption")
-    logging.info('Decrypted data ' + decrypted_data)
-    logging.debug("********** End PubsubMessage ")    
-    return decrypted_data
+    logging.info("End AES decryption")
+    logging.debug('Decrypted data ' + decrypted_data.decode('utf-8'))
+    logging.info("********** End PubsubMessage ")    
+    return decrypted_data.decode('utf-8')
 
 
   def verify(self,attributes, data):
@@ -97,28 +84,14 @@ class DecryptDoFn(beam.DoFn):
     import json
     import base64
     import httplib2
-    from apiclient.discovery import build
-    from oauth2client.client import GoogleCredentials
-    from expiringdict import ExpiringDict
+
+    from google.cloud import kms
+
     from gcp_encryption.utils import AESCipher, HMACFunctions, RSACipher
 
-    if self.cache is None:
-      self.cache = ExpiringDict(max_len=100, max_age_seconds=200)
-      
-    scope='https://www.googleapis.com/auth/cloudkms https://www.googleapis.com/auth/pubsub'
-    
-    credentials = GoogleCredentials.get_application_default()
-    if credentials.create_scoped_required():
-      credentials = credentials.create_scoped(scope)
-
-    http = httplib2.Http()
-    credentials.authorize(http)
+    client = kms.KeyManagementServiceClient()
 
     self.tenantID = 'tenantKey'
-
-    if self.crypto_keys is None:
-      kms_client = build('cloudkms', 'v1')
-      self.crypto_keys = kms_client.projects().locations().keyRings().cryptoKeys()
 
     logging.info("********** Start PubsubMessage ")
     logging.debug('Received message attributes["kms_key"]: {}'.format(attributes['kms_key']))
@@ -130,32 +103,30 @@ class DecryptDoFn(beam.DoFn):
     sign_key_wrapped = attributes['sign_key_wrapped']
 
     try:
-      unwrapped_key = self.cache[sign_key_wrapped]
+      unwrapped_key = cache[sign_key_wrapped]
       logging.info("DEK Cache HIT: " + sign_key_wrapped)
     except KeyError:
       logging.info("DEK Cache MISS: " + sign_key_wrapped)
-      logging.info("Starting KMS decryption API call")
-      request = self.crypto_keys.decrypt(
-            name=name,
-            body={
-            'ciphertext': (sign_key_wrapped).decode('utf-8'),
-            'additionalAuthenticatedData': base64.b64encode(self.tenantID).decode('utf-8')
-            })
-      response = request.execute()
-      unwrapped_key =  base64.b64decode(response['plaintext'])
+      logging.info("Starting KMS decryption API call " + self.tenantID)
+      try:
+        unwrapped_key = client.decrypt(name=name, 
+                          ciphertext=base64.b64decode(attributes['sign_key_wrapped']),
+                          additional_authenticated_data=self.tenantID.encode('utf-8'))
+      except Error as e:
+        logging.debug("Error decrypting data " + e)
       logging.info("End KMS decryption API call")
-      logging.debug("Verify message: " + data)
+      logging.debug("Verify message: " + data.decode('utf-8'))
       logging.debug('  With HMAC: ' + signature)
-      logging.debug('  With unwrapped key: ' + base64.b64encode(unwrapped_key))      
-      self.cache[sign_key_wrapped] = unwrapped_key
+      logging.debug('  With unwrapped key: ' + unwrapped_key.plaintext.hex())      
+      cache[sign_key_wrapped] = unwrapped_key
           
-    hh = HMACFunctions(base64.b64encode(unwrapped_key))
-    sig = hh.hash(data)
-    logging.debug("********** End PubsubMessage ")
+    hh = HMACFunctions(unwrapped_key.plaintext)
+    sig = hh.hash(data.decode('utf-8'))
+    logging.info("********** End PubsubMessage ")
 
     if (hh.verify(base64.b64decode(sig))):
-      logging.info("Message authenticity verified")
-      return data
+      logging.info("Message authenticity verified with signature: " + signature)
+      return data.decode('utf-8')
     else:
       logging.error("ERROR: Unable to verify message ")
       return None
@@ -169,7 +140,7 @@ class DecryptDoFn(beam.DoFn):
 class TermCounterDoFn(beam.DoFn):
 
   def __init__(self, term):
-    super(TermCounterDoFn, self).__init__()
+    beam.DoFn.__init__(self)
     self.term = term
     self.words_counter = Metrics.counter(self.__class__, 'words')
     self.word_lengths_counter = Metrics.counter(self.__class__, 'word_lengths')

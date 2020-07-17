@@ -5,13 +5,12 @@ import time
 import logging
 
 from google.cloud import pubsub
+from google.cloud import kms
 import argparse
 
 import json, time
 import base64, binascii
 import httplib2
-from apiclient.discovery import build
-from oauth2client.client import GoogleCredentials
 import lorem
 
 from expiringdict import ExpiringDict
@@ -38,13 +37,6 @@ scope='https://www.googleapis.com/auth/cloudkms https://www.googleapis.com/auth/
 
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = args.service_account
 
-credentials = GoogleCredentials.get_application_default()
-if credentials.create_scoped_required():
-  credentials = credentials.create_scoped(scope)
-
-http = httplib2.Http()
-credentials.authorize(http)
-
 pubsub_project_id = args.pubsub_project_id
 kms_project_id = args.kms_project_id
 location_id = args.kms_location
@@ -56,40 +48,32 @@ PUBSUB_TOPIC=args.pubsub_topic
 
 cache = ExpiringDict(max_len=100, max_age_seconds=200)
 
-
-kms_client = build('cloudkms', 'v1')
 name = 'projects/{}/locations/{}/keyRings/{}/cryptoKeys/{}'.format(
         kms_project_id, location_id, key_ring_id, crypto_key_id)
 
 publisher = pubsub.PublisherClient()
+kmsclient = kms.KeyManagementServiceClient()
 
 if args.mode =="sign":
   logging.info(">>>>>>>>>>> Start Sign with with locally generated key. <<<<<<<<<<<")
 
-  for i in range(200):
+  for i in range(10):
 
-    if (i%200 ==0 ):
+    if (i%5 ==0 ):
       logging.info("Rotating key")
       hh = HMACFunctions()
       sign_key = hh.getDerivedKey()
-      logging.debug("Generated Derived Key: " + base64.b64encode(sign_key))
+      logging.debug("Generated Derived Key: " + base64.b64encode(sign_key).decode('utf-8'))
 
       logging.info("Starting KMS encryption API call")
-      crypto_keys = kms_client.projects().locations().keyRings().cryptoKeys()
-      request = crypto_keys.encrypt(
-                name=name,
-                body={
-                'plaintext': base64.b64encode(sign_key).decode('utf-8'),
-                'additionalAuthenticatedData': base64.b64encode(tenantID).decode('utf-8')
-                })
-      response = request.execute()
-      sign_key_wrapped = response['ciphertext'].encode('utf-8')
+      sign_key_wrapped = kmsclient.encrypt(name=name, plaintext=sign_key,additional_authenticated_data=tenantID.encode('utf-8'))
+    
       logging.info("End KMS encryption API call")
 
     cleartext_message = lorem.paragraph()
     msg_hash = hh.hash(cleartext_message)
 
-    logging.debug("Generated Signature: " + msg_hash)
+    logging.info("Generated Signature: " + msg_hash.decode())
     logging.debug("End signature")
 
     logging.info("Start PubSub Publish")
@@ -99,10 +83,10 @@ if args.mode =="sign":
       topic=PUBSUB_TOPIC,
     )
 
-    publisher.publish(topic_name, data=json.dumps(cleartext_message), kms_key=name, sign_key_wrapped=sign_key_wrapped, signature=msg_hash)
+    publisher.publish(topic_name, data=cleartext_message.encode('utf-8'), kms_key=name, sign_key_wrapped=base64.b64encode(sign_key_wrapped.ciphertext), signature=msg_hash)
     logging.info("Published Message: " + str(cleartext_message))
     logging.info(" with key_id: " + name)
-    logging.info(" with wrapped signature key " + sign_key_wrapped)
+    logging.info(" with wrapped signature key " + base64.b64encode(sign_key_wrapped.ciphertext).decode())
     time.sleep(5)
   logging.debug("End PubSub Publish")
   logging.info(">>>>>>>>>>> END <<<<<<<<<<<")
@@ -110,26 +94,19 @@ if args.mode =="sign":
 if args.mode =="encrypt":
     logging.info(">>>>>>>>>>> Start Encryption with locally generated key.  <<<<<<<<<<<")
 
-    for i in range(200):
+    for i in range(10):
 
-      if (i%200 ==0 ):
+      if (i%5 ==0 ):
         logging.info("Rotating symmetric key")
         # 256bit AES key
         dek = os.urandom(32)
-        logging.debug("Generated dek: " + base64.b64encode(dek) )
+        logging.debug("Generated dek: " + base64.b64encode(dek).decode('utf-8')) 
 
         logging.info("Starting KMS encryption API call")
-        crypto_keys = kms_client.projects().locations().keyRings().cryptoKeys()
-        request = crypto_keys.encrypt(
-                name=name,
-                body={
-                'plaintext': base64.b64encode(dek).decode('utf-8'),
-                'additionalAuthenticatedData': base64.b64encode(tenantID).decode('utf-8')
-                })
-        response = request.execute()
-        dek_encrypted = response['ciphertext'].encode('utf-8')
 
-        logging.debug("Wrapped dek: " + dek_encrypted)
+        dek_encrypted = kmsclient.encrypt(name=name, plaintext=dek,additional_authenticated_data=tenantID.encode('utf-8'))
+
+        logging.debug("Wrapped dek: " + base64.b64encode(dek_encrypted.ciphertext).decode())
         logging.info("End KMS encryption API call")
 
         logging.debug("Starting AES encryption")
@@ -139,8 +116,7 @@ if args.mode =="encrypt":
       encrypted_message = ac.encrypt(cleartext_message)
 
       logging.debug("End AES encryption")
-      logging.debug("Encrypted Message with dek: " + encrypted_message)
-
+      logging.debug("Encrypted Message with dek: " + encrypted_message.decode())
 
       logging.info("Start PubSub Publish")
       
@@ -148,8 +124,8 @@ if args.mode =="encrypt":
           project_id=pubsub_project_id,
           topic=PUBSUB_TOPIC,
       )
-      publisher.publish(topic_name, data=encrypted_message.encode('utf-8'), kms_key=name, dek_wrapped=dek_encrypted)
-      logging.info("Published Message: " + encrypted_message)
+      publisher.publish(topic_name, data=encrypted_message, kms_key=name, dek_wrapped=base64.b64encode(dek_encrypted.ciphertext).decode())
+      logging.info("Published Message: " + base64.b64encode(encrypted_message).decode('utf-8'))
       time.sleep(5)
     logging.info("End PubSub Publish")
     logging.info(">>>>>>>>>>> END <<<<<<<<<<<")

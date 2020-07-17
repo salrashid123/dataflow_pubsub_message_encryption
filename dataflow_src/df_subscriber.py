@@ -12,8 +12,6 @@ import argparse
 import json
 import base64
 import httplib2
-from apiclient.discovery import build
-from oauth2client.client import GoogleCredentials
 
 parser = argparse.ArgumentParser(description='DF Message Subscriber')
 
@@ -27,13 +25,6 @@ args = parser.parse_args()
 scope='https://www.googleapis.com/auth/pubsub'
 
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = args.service_account
-
-credentials = GoogleCredentials.get_application_default()
-if credentials.create_scoped_required():
-  credentials = credentials.create_scoped(scope)
-
-http = httplib2.Http()
-credentials.authorize(http)
 
 pubsub_project_id = args.pubsub_project_id
 

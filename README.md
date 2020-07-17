@@ -92,35 +92,39 @@ To run these commands, you need to either be a project owner or have the ability
 Since we will create several projects, in one shell, setup some variables
 ```
 
-gcloud auth application-default login
-
 export NONCE=$(date '+%Y-%m-%d')-$USER
 export df_PROJECT=df-project-$NONCE
+export REGION=us-central1
 export tenant_1=tenant-1-$NONCE
 export tenant_2=tenant-2-$NONCE
 ```
 
 ### Create DataFlow Project
 
-Now create a project that will host the dataflow and pubsub common topic:
+Now create a project that will host the dataflow and pubsub common topic.
+
+Remember to associate a billing account with this project.
 
 ```
 gcloud projects create $df_PROJECT --name "Dataflow Pubsub Bus" --enable-cloud-apis 
-gcloud config set project $df_PROJECT
-gcloud services enable dataflow.googleapis.com cloudkms.googleapis.com
+gcloud services enable dataflow.googleapis.com cloudkms.googleapis.com --project $df_PROJECT
+gcloud config set project df-project-$NONCE
+
+gcloud auth application-default login
 ```
 
 - Create a service account that will subscribe to events emitted by the DF pipeline
 
 ```
+cd dataflow_src/
 mkdir certs
-gcloud iam service-accounts create df-project --display-name="Dataflow Project Service Account"
-gcloud iam service-accounts keys  create certs/svc-provider.json --iam-account=df-project@$df_PROJECT.iam.gserviceaccount.com
+gcloud iam service-accounts create df-project --display-name="Dataflow Project Service Account" --project $df_PROJECT
+gcloud iam service-accounts keys  create certs/svc-provider.json --iam-account=df-project@$df_PROJECT.iam.gserviceaccount.com --project $df_PROJECT
 ```
 
 You should see two service accounts if its a newly created project:
     ```
-    $ gcloud iam service-accounts list
+    $ gcloud iam service-accounts list --project $df_PROJECT
     NAME                                    EMAIL
     Dataflow Project Service Account        df-project@df-project-2018-11-04.iam.gserviceaccount.com
     Compute Engine default service account  676774233129-compute@developer.gserviceaccount.com
@@ -130,20 +134,33 @@ You should see two service accounts if its a newly created project:
 - Create the pubsub Topic and allow DF to subscribe:
 
 ```
-gcloud pubsub topic create common-topic
-gcloud pubsub subscriptions create message-bus --topic=common-topic
+gcloud pubsub topics create common-topic --project $df_PROJECT
+gcloud pubsub subscriptions create message-bus --topic=common-topic --project $df_PROJECT 
 ```
 
 ![images/service_accounts_df.png](images/service_accounts_df.png)
 
 
-- Use Google Cloud console to set IAM permission on the DF Project service account to subscribe
+- Use Google Cloud console or gcloud  to set IAM permission on the DF Project service account to subscribe
 
-```
-export df_PROJECT_NUMBER=$(gcloud projects describe $df_PROJECT --format='value(projectNumber)')
-```
+```bash
+export df_PROJECT_NUMBER=`gcloud projects describe  $df_PROJECT --format="value(projectNumber)"`
+export df_COMPUTE_SVC_ACCOUNT=$df_PROJECT_NUMBER-compute@developer.gserviceaccount.com
 
->> use cloud console to set IAM permissions on message-bus
+echo "{
+  \"bindings\": [
+    {
+      \"role\": \"roles/pubsub.subscriber\",
+      \"members\": [
+        \"serviceAccount:$df_COMPUTE_SVC_ACCOUNT\",
+      ]
+    }
+  ],
+}" >policy.txt
+
+gcloud  --project  $df_PROJECT pubsub subscriptions set-iam-policy message-bus policy.txt
+rm policy.txt
+```
 
   ![images/df_subscriber.png](images/df_subscriber.png)
 
@@ -163,17 +180,49 @@ gsutil iam ch user:$(gcloud config get-value core/account):objectCreator,objectV
 - Create output topic/subscriptions for DF
 
 ```
-gcloud pubsub topics create df_out
-gcloud pubsub subscriptions create df_subscribe --topic=df_out
+gcloud pubsub topics create df_out --project $df_PROJECT 
+gcloud pubsub subscriptions create df_subscribe --topic=df_out --project $df_PROJECT
 ```
 
 - Use cloud console to add IAM permissions to the topic and subscription
 
 1)  goto  topic 'df_out'  add the  "Compute Engine default service account" as a pubslisher
 
+```bash
+echo "{
+  \"bindings\": [
+    {
+      \"role\": \"roles/pubsub.publisher\",
+      \"members\": [
+        \"serviceAccount:$df_COMPUTE_SVC_ACCOUNT\",
+      ]
+    }
+  ],
+}" >policy.txt
+
+gcloud  --project  $df_PROJECT pubsub topics set-iam-policy df_out policy.txt
+rm policy.txt
+```
+
  ![images/df_out_publish.png](images/df_out_publish.png)
 
 2) goto subscription for 'df_out' --> 'df_subscribe' add the  "Dataflow Project Service Account " as a subscirber
+
+```bash
+echo "{
+  \"bindings\": [
+    {
+      \"role\": \"roles/pubsub.subscriber\",
+      \"members\": [
+        \"serviceAccount:df-project@$df_PROJECT.iam.gserviceaccount.com\",
+      ]
+    }
+  ],
+}" >policy.txt
+
+gcloud  --project  $df_PROJECT pubsub subscriptions set-iam-policy df_subscribe policy.txt
+rm policy.txt
+```
 
  ![images/df_out_subscribe.png](images/df_out_subscribe.png)
 
@@ -183,20 +232,24 @@ Now that we've setup the first part, lets see if we can run the dataflow pipelin
 
 - Setup a virtualenv and package the custom libraries:
 
-```
-virtualenv env
+```bash
+virtualenv env --python=/usr/bin/python3.7
 source env/bin/activate
 cd gcp_encryption/
 python setup.py sdist
 cd ../
 
-pip install apache-beam[gcp]  google-cloud-pubsub google-api-python-client lorem cryptography expiringdict
+pip install apache-beam[gcp]  google-cloud-pubsub google-cloud-kms lorem cryptography expiringdict
 ```
 
-- Now run the pipeline:
+- Now run the pipeline with `DataFlowRunner`  (you can also just use `DirectRunner` for local testing if your user credentials
+has access to the topics and subscriptions defined above)
 
-```
-python pubsub_bus.py --runner DataFlowRunner \
+```bash
+python pubsub_bus.py \
+    --mode=decrypt \
+    --region=$REGION \
+    --runner DataFlowRunner \
     --setup_file `pwd`/setup.py  \
     --extra_package=`pwd`/gcp_encryption/dist/gcp_encryption-0.0.1.tar.gz  \
     --max_num_workers=1 \
@@ -213,7 +266,7 @@ python pubsub_bus.py --runner DataFlowRunner \
 ### Create subscriber for DF pipeline Output
 
 In a new window, reset the environment variables
-```
+```bash
 source env/bin/activate
 export NONCE=$(date '+%Y-%m-%d')-$USER
 export df_PROJECT=df-project-$NONCE
@@ -223,8 +276,10 @@ export tenant_2=tenant-2-$NONCE
 
 Now run the subscriber
 
-```
-python df_subscriber.py --service_account certs/svc-provider.json --pubsub_project_id $df_PROJECT --pubsub_subscription df_subscribe
+```bash
+python df_subscriber.py --service_account certs/svc-provider.json \
+  --pubsub_project_id $df_PROJECT \
+  --pubsub_subscription df_subscribe
 ```
 
 
@@ -236,7 +291,7 @@ At the end of this step, you should have a pubsub pipeline running and a subscri
 The following step will setup a pubsub message producer to send encrypted messages into the common, shared topic
 
 In a new window, reset the environment variables
-```
+```bash
 source env/bin/activate
 export NONCE=$(date '+%Y-%m-%d')-$USER
 export df_PROJECT=df-project-$NONCE
@@ -246,28 +301,29 @@ export tenant_2=tenant-2-$NONCE
 
 - Create the tenant/producer project
 
-```
+```bash
 gcloud projects create $tenant_1 --name "Tenant-1" --enable-cloud-apis 
-gcloud config set project $tenant_1
-gcloud services enable cloudkms.googleapis.com pubsub.googleapis.com
+gcloud services enable cloudkms.googleapis.com pubsub.googleapis.com --project $tenant_1
 ```
+
+Associate a billing account with `$tenant_1`
 
 - Create a service account on that project
 
 ```
-gcloud iam service-accounts create tenant-1-svc --display-name="Tenant-1 Service Account"
-gcloud iam service-accounts keys  create certs/svc-tenant-1.json --iam-account=tenant-1-svc@$tenant_1.iam.gserviceaccount.com
+gcloud iam service-accounts create tenant-1-svc --display-name="Tenant-1 Service Account" --project $tenant_1
+gcloud iam service-accounts keys  create certs/svc-tenant-1.json --iam-account=tenant-1-svc@$tenant_1.iam.gserviceaccount.com --project $tenant_1
 ```
 
 - Create a KMS keyring and Key
 ```
-gcloud kms keyrings create tenant1-keyring  --location us-central1
-gcloud kms keys create key1 --location=us-central1 --purpose=encryption --keyring=tenant1-keyring
+gcloud kms keyrings create tenant1-keyring  --location $REGION --project $tenant_1
+gcloud kms keys create key1 --location=$REGION --purpose=encryption --keyring=tenant1-keyring --project $tenant_1
 ```
 
 Your tenant project should now show a single service account
 ```
-  $ gcloud iam service-accounts list
+  $ gcloud iam service-accounts list --project $tenant_1
   NAME                      EMAIL
   Tenant-1 Service Account  tenant-1-svc@tenant-1-2018-11-04.iam.gserviceaccount.com
 ```
@@ -280,24 +336,27 @@ First set an IAM policy on the key such that the Service Account that runs Dataf
 
 Note, your service account will be different
 
-```
+```bash
+# first make sure you have this set in env
+echo $df_COMPUTE_SVC_ACCOUNT
+
 gcloud kms keys add-iam-policy-binding key1 \
       --keyring tenant1-keyring \
-      --location us-central1 \
-      --member='serviceAccount:676774233129-compute@developer.gserviceaccount.com' \
-      --role='roles/cloudkms.cryptoKeyDecrypter'
+      --location $REGION \
+      --member=serviceAccount:$df_COMPUTE_SVC_ACCOUNT \
+      --role='roles/cloudkms.cryptoKeyDecrypter' --project $tenant_1
 ```
 
 Second, set KMS permissions so the service account that places a message on the common topic has the rights to use
 that key to encrypt:
 
 Note, your service account will be different
-```
+```bash
 gcloud kms keys add-iam-policy-binding key1 \
       --keyring tenant1-keyring \
-      --location us-central1 \
-      --member='serviceAccount:tenant-1-svc@tenant-1-2018-11-04.iam.gserviceaccount.com' \
-      --role='roles/cloudkms.cryptoKeyEncrypter'
+      --location $REGION \
+      --member=serviceAccount:tenant-1-svc@$tenant_1.iam.gserviceaccount.com \
+      --role='roles/cloudkms.cryptoKeyEncrypter' --project $tenant_1
 ```
 
   ![images/tenant_kms_permissions.png](images/tenant_kms_permissions.png)
@@ -306,11 +365,24 @@ gcloud kms keys add-iam-policy-binding key1 \
 
 Switch to the main Dataflow Pipeline project
 
-```
-gcloud config set project $df_PROJECT
-```
-
 Use Cloud console to add the tenant/producers's service account rights to place messages on the shared Topic:
+
+
+```bash
+echo "{
+  \"bindings\": [
+    {
+      \"role\": \"roles/pubsub.publisher\",
+      \"members\": [
+        \"serviceAccount:tenant-1-svc@$tenant_1.iam.gserviceaccount.com\",
+      ]
+    }
+  ],
+}" >policy.txt
+
+gcloud  --project  $df_PROJECT pubsub topics set-iam-policy common-topic policy.txt
+rm policy.txt
+```
 
 ```
 add tenant-1-svc@tenant-1-2018-11-04.iam.gserviceaccount.com  to topic 
@@ -324,10 +396,10 @@ add tenant-1-svc@tenant-1-2018-11-04.iam.gserviceaccount.com  to topic
 
 Now try to run the publisher script:
 
-```
+```bash
 python publisher.py  --mode encrypt --service_account 'certs/svc-tenant-1.json' --pubsub_project_id $df_PROJECT \
    --pubsub_topic common-topic --kms_project_id $tenant_1  \
-   --kms_location us-central1 --kms_key_ring_id tenant1-keyring --kms_key_id key1
+   --kms_location $REGION --kms_key_ring_id tenant1-keyring --kms_key_id key1
 ```
 
 What that will do is create an AES key, wrap it with KMS, then place the message on the shared topcic:
@@ -350,10 +422,10 @@ python publisher.py  --mode encrypt --service_account 'certs/svc-tenant-1.json' 
 
 The dataflow pipline should be still running from the previous step:
 
-The DF pipeline here will be reading in a message, decrypting it and placing the worcounts on another output topic
+The DF pipeline here will be reading in a message, decrypting it and placing the wordcounts on another output topic
 
 ```
-$ python pubsub_bus.py --runner DataFlowRunner --setup_file `pwd`/setup.py   --extra_package=`pwd`/gcp_encryption/dist/gcp_encryption-0.0.1.tar.gz  --max_num_workers=1 --project $df_PROJECT --temp_location gs://$df_PROJECT-dftemp/temp --staging_location gs://$df_PROJECT-dftemp/stage  --output_topic projects/$df_PROJECT/topics/df_out  --input_subscription projects/$df_PROJECT/subscriptions/message-bus --mode decrypt
+$ python pubsub_bus.py --runner DataFlowRunner --setup_file `pwd`/setup.py   --requirements_file requirements.txt --extra_package=`pwd`/gcp_encryption/dist/gcp_encryption-0.0.1.tar.gz  --max_num_workers=1 --project $df_PROJECT --temp_location gs://$df_PROJECT-dftemp/temp --staging_location gs://$df_PROJECT-dftemp/stage  --output_topic projects/$df_PROJECT/topics/df_out  --input_subscription projects/$df_PROJECT/subscriptions/message-bus --region $REGION --mode decrypt
 
 Starting
 ...
