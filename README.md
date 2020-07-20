@@ -239,7 +239,7 @@ cd gcp_encryption/
 python setup.py sdist
 cd ../
 
-pip install apache-beam[gcp]  google-cloud-pubsub google-cloud-kms lorem cryptography expiringdict
+pip install apache-beam[gcp] google-cloud-kms lorem cryptography expiringdict
 ```
 
 - Now run the pipeline with `DataFlowRunner`  (you can also just use `DirectRunner` for local testing if your user credentials
@@ -397,9 +397,7 @@ add tenant-1-svc@tenant-1-2018-11-04.iam.gserviceaccount.com  to topic
 Now try to run the publisher script:
 
 ```bash
-python publisher.py  --mode encrypt --service_account 'certs/svc-tenant-1.json' --pubsub_project_id $df_PROJECT \
-   --pubsub_topic common-topic --kms_project_id $tenant_1  \
-   --kms_location $REGION --kms_key_ring_id tenant1-keyring --kms_key_id key1
+
 ```
 
 What that will do is create an AES key, wrap it with KMS, then place the message on the shared topcic:
