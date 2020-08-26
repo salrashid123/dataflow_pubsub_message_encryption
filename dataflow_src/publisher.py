@@ -62,18 +62,18 @@ if args.mode =="sign":
     if (i%5 ==0 ):
       logging.info("Rotating key")
       hh = HMACFunctions()
-      sign_key = hh.getDerivedKey()
-      logging.debug("Generated Derived Key: " + base64.b64encode(sign_key).decode('utf-8'))
+      sign_key = hh.getKey()
+      logging.debug("Generated Derived Key: " + sign_key)
 
       logging.info("Starting KMS encryption API call")
-      sign_key_wrapped = kmsclient.encrypt(name=name, plaintext=sign_key,additional_authenticated_data=tenantID.encode('utf-8'))
-    
+      #sign_key_wrapped = kmsclient.encrypt(name=name, plaintext=sign_key,additional_authenticated_data=tenantID.encode('utf-8'))
+      sign_key_wrapped = kmsclient.encrypt(name=name, plaintext=sign_key.encode('utf-8'),additional_authenticated_data=tenantID.encode('utf-8'))
+
       logging.info("End KMS encryption API call")
 
     cleartext_message = lorem.paragraph()
-    msg_hash = hh.hash(cleartext_message)
-
-    logging.info("Generated Signature: " + msg_hash.decode())
+    msg_hash = hh.hash(cleartext_message.encode('utf-8'))
+    logging.info("Generated Signature: " + msg_hash.decode('utf-8'))
     logging.debug("End signature")
 
     logging.info("Start PubSub Publish")
@@ -98,25 +98,29 @@ if args.mode =="encrypt":
 
       if (i%5 ==0 ):
         logging.info("Rotating symmetric key")
-        # 256bit AES key
-        dek = os.urandom(32)
-        logging.debug("Generated dek: " + base64.b64encode(dek).decode('utf-8')) 
+
+
+        ac = AESCipher(encoded_key=None)
+        dek = ac.getKey().encode()
+
+        logging.debug("Generated dek: " + base64.b64encode(dek).decode() )
+
 
         logging.info("Starting KMS encryption API call")
 
         dek_encrypted = kmsclient.encrypt(name=name, plaintext=dek,additional_authenticated_data=tenantID.encode('utf-8'))
 
-        logging.debug("Wrapped dek: " + base64.b64encode(dek_encrypted.ciphertext).decode())
+        dek_key_wrapped = dek_encrypted.ciphertext
+        logging.info("Wrapped dek: " +  base64.b64encode(dek_key_wrapped).decode('utf-8'))
         logging.info("End KMS encryption API call")
 
         logging.debug("Starting AES encryption")
-        ac = AESCipher(dek)
 
       cleartext_message = lorem.paragraph()
-      encrypted_message = ac.encrypt(cleartext_message)
+      encrypted_message = ac.encrypt(cleartext_message.encode('utf-8'),associated_data="")
 
       logging.debug("End AES encryption")
-      logging.debug("Encrypted Message with dek: " + encrypted_message.decode())
+      logging.debug("Encrypted Message with dek: " + encrypted_message)
 
       logging.info("Start PubSub Publish")
       
@@ -124,8 +128,8 @@ if args.mode =="encrypt":
           project_id=pubsub_project_id,
           topic=PUBSUB_TOPIC,
       )
-      publisher.publish(topic_name, data=encrypted_message, kms_key=name, dek_wrapped=base64.b64encode(dek_encrypted.ciphertext).decode())
-      logging.info("Published Message: " + base64.b64encode(encrypted_message).decode('utf-8'))
+      publisher.publish(topic_name, data=encrypted_message.encode(), kms_key=name, dek_wrapped=base64.b64encode(dek_encrypted.ciphertext).decode())
+      logging.info("Published Message: " + encrypted_message)
       time.sleep(5)
     logging.info("End PubSub Publish")
     logging.info(">>>>>>>>>>> END <<<<<<<<<<<")

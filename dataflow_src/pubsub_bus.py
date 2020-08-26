@@ -70,11 +70,11 @@ class DecryptDoFn(beam.DoFn):
       cache[dek_wrapped] = dek
     logging.info("Starting AES decryption")
     ac = AESCipher(dek.plaintext)
-    decrypted_data = ac.decrypt(data)
+    decrypted_data = ac.decrypt(data,associated_data="")
     logging.info("End AES decryption")
-    logging.debug('Decrypted data ' + decrypted_data.decode('utf-8'))
+    logging.debug('Decrypted data ' + decrypted_data)
     logging.info("********** End PubsubMessage ")    
-    return decrypted_data.decode('utf-8')
+    return decrypted_data
 
 
   def verify(self,attributes, data):
@@ -120,11 +120,11 @@ class DecryptDoFn(beam.DoFn):
       logging.debug('  With unwrapped key: ' + unwrapped_key.plaintext.hex())      
       cache[sign_key_wrapped] = unwrapped_key
           
-    hh = HMACFunctions(unwrapped_key.plaintext)
-    sig = hh.hash(data.decode('utf-8'))
+    hh = HMACFunctions(unwrapped_key.plaintext) 
+    sig = hh.hash(data)
     logging.info("********** End PubsubMessage ")
 
-    if (hh.verify(base64.b64decode(sig))):
+    if (hh.verify(data, base64.b64decode(sig))):
       logging.info("Message authenticity verified with signature: " + signature)
       return data.decode('utf-8')
     else:

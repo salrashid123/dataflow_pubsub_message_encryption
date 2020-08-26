@@ -87,7 +87,7 @@ To run these commands, you need to either be a project owner or have the ability
    - `--pubsub_project_id`: projectID for the shared pubsub topic
    - `--pubsub_subscription`:  Subscription to read messages from te shared topic
 
-### Setup Enviornment variables
+### Setup Environment variables
 
 Since we will create several projects, in one shell, setup some variables
 ```
@@ -226,20 +226,21 @@ rm policy.txt
 
  ![images/df_out_subscribe.png](images/df_out_subscribe.png)
 
-### Run DF pipline:
+### Run DF pipeline:
 
 Now that we've setup the first part, lets see if we can run the dataflow pipeline as is:
 
 - Setup a virtualenv and package the custom libraries:
 
 ```bash
+gcloud auth application-default login
 virtualenv env --python=/usr/bin/python3.7
 source env/bin/activate
 cd gcp_encryption/
 python setup.py sdist
 cd ../
 
-pip install apache-beam[gcp] google-cloud-kms lorem cryptography expiringdict
+pip install apache-beam[gcp] google-cloud-kms lorem cryptography expiringdict tink
 ```
 
 - Now run the pipeline with `DataFlowRunner`  (you can also just use `DirectRunner` for local testing if your user credentials
@@ -249,7 +250,7 @@ has access to the topics and subscriptions defined above)
 python pubsub_bus.py \
     --mode=decrypt \
     --region=$REGION \
-    --runner DataFlowRunner \
+    --runner DirectRunner \
     --setup_file `pwd`/setup.py  \
     --extra_package=`pwd`/gcp_encryption/dist/gcp_encryption-0.0.1.tar.gz  \
     --max_num_workers=1 \
