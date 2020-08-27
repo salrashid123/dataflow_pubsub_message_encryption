@@ -234,13 +234,16 @@ Now that we've setup the first part, lets see if we can run the dataflow pipelin
 
 ```bash
 gcloud auth application-default login
+cd dataflow_src/
 virtualenv env --python=/usr/bin/python3.7
 source env/bin/activate
 cd gcp_encryption/
 python setup.py sdist
 cd ../
 
-pip install apache-beam[gcp] google-cloud-kms lorem cryptography expiringdict tink
+# todo upgrade https://github.com/googleapis/python-kms/blob/release-v2.0.0/UPGRADING.md
+
+pip install apache-beam[gcp] google-cloud-kms==1.4.0 lorem cryptography expiringdict tink
 ```
 
 - Now run the pipeline with `DataFlowRunner`  (you can also just use `DirectRunner` for local testing if your user credentials
@@ -404,10 +407,12 @@ Now try to run the publisher script:
 What that will do is create an AES key, wrap it with KMS, then place the message on the shared topcic:
 
 
-```
+```bash
 python publisher.py  --mode encrypt --service_account 'certs/svc-tenant-1.json' --pubsub_project_id $df_PROJECT \
    --pubsub_topic common-topic --kms_project_id $tenant_1  \
    --kms_location us-central1 --kms_key_ring_id tenant1-keyring --kms_key_id key1
+
+
 2018-11-04 09:56:43,242 - root - INFO - >>>>>>>>>>> Start Encryption with locally generated key.  <<<<<<<<<<<
 2018-11-04 09:56:43,242 - root - INFO - Rotating symmetric key
 2018-11-04 09:56:43,242 - root - INFO - Starting KMS encryption API call
@@ -419,7 +424,7 @@ python publisher.py  --mode encrypt --service_account 'certs/svc-tenant-1.json' 
 
 ---
 
-The dataflow pipline should be still running from the previous step:
+The dataflow pipeline should be still running from the previous step:
 
 The DF pipeline here will be reading in a message, decrypting it and placing the wordcounts on another output topic
 

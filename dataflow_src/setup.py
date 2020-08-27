@@ -23,7 +23,7 @@ CUSTOM_COMMANDS = [
     ['apt-get', '-y', 'install', 'python-dev'],
     ['apt-get', '-y', 'install', 'libffi-dev'],
     ['apt-get', '-y', 'install', 'libssl-dev'],
-    ['pip', 'install', 'cryptography', 'google-cloud-kms', 'expiringdict', 'tink'],
+    ['pip', 'install', 'cryptography', 'google-cloud-kms==1.4.0', 'expiringdict', 'tink'],
 ]
 
 

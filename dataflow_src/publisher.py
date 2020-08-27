@@ -66,9 +66,8 @@ if args.mode =="sign":
       logging.debug("Generated Derived Key: " + sign_key)
 
       logging.info("Starting KMS encryption API call")
-      #sign_key_wrapped = kmsclient.encrypt(name=name, plaintext=sign_key,additional_authenticated_data=tenantID.encode('utf-8'))
-      sign_key_wrapped = kmsclient.encrypt(name=name, plaintext=sign_key.encode('utf-8'),additional_authenticated_data=tenantID.encode('utf-8'))
-
+      sign_key_wrapped = kmsclient.encrypt(name=name, plaintext=sign_key,additional_authenticated_data=tenantID.encode('utf-8'))
+      
       logging.info("End KMS encryption API call")
 
     cleartext_message = lorem.paragraph()
